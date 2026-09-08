@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#08090d">
+  <title>usebespoke — Intelligence in motion</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { background: #08090d; background-image: radial-gradient(ellipse at 50% 47%, #18131c 0%, #0b0b10 43%, #08090d 76%); color: #f5eee7; font-family: Arial, Helvetica, sans-serif; }
+    canvas { display: block; width: 100%; height: 100%; touch-action: manipulation; }
+    .copy { position: fixed; inset: 0; display: grid; place-content: center; gap: 15px; pointer-events: none; text-align: center; mix-blend-mode: screen; }
+    h1, p { margin: 0; }
+    h1 { color: rgba(255, 247, 238, .13); font-size: clamp(2.2rem, 5.2vw, 5.5rem); font-weight: 700; letter-spacing: -.075em; line-height: .85; }
+    p { color: rgba(255, 238, 219, .42); font-size: clamp(.62rem, 1vw, .86rem); font-weight: 600; letter-spacing: .29em; text-transform: uppercase; }
+    .hint { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); color: rgba(255, 238, 219, .25); font-size: 10px; letter-spacing: .15em; text-transform: uppercase; white-space: nowrap; pointer-events: none; }
+    @media (max-width: 600px) { .copy { gap: 12px; } .hint { bottom: 20px; } }
+    @media (prefers-reduced-motion: reduce) { .hint { display: none; } }
+  </style>
+</head>
+<body>
+  <canvas role="img" aria-label="A field of floating particles, responding to movement."></canvas>
+  <main class="copy"><h1>usebespoke</h1><p>intelligence in motion</p></main>
+  <span class="hint">Move through it</span>
+  <script>
+    (() => {
+      'use strict';
+      const COUNT = 1650, SPRING = 21, DAMPING = 7.2, STEP = 1 / 120;
+      const canvas = document.querySelector('canvas'), ctx = canvas.getContext('2d');
+      const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+      const pointer = { x: 0, y: 0, active: false };
+      let w = 0, h = 0, ratio = 1, t = 0, previous = null, accumulator = 0, frame = null, seed = 213;
+      let isReduced = reduced.matches;
+      const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
+      const particles = Array.from({ length: COUNT }, () => {
+        const edge = Math.pow(random(), .66), angle = random() * Math.PI * 2;
+        return { ux: Math.cos(angle) * edge, uy: Math.sin(angle) * edge, x: 0, y: 0, vx: 0, vy: 0, r: .45 + random() * 1.15, a: .18 + random() * .72, phase: random() * Math.PI * 2, hue: 18 + random() * 30 };
+      });
+      function place(reset = false) {
+        const unit = Math.min(w, h) * .48;
+        for (const p of particles) {
+          const x = w / 2 + p.ux * unit * (1 + Math.sin(p.phase) * .08), y = h / 2 + p.uy * unit * .66;
+          if (reset) { p.x = x; p.y = y; p.vx = p.vy = 0; }
+        }
+      }
+      function resize() {
+        const rect = canvas.getBoundingClientRect(); w = rect.width; h = rect.height; ratio = Math.min(devicePixelRatio || 1, 2);
+        canvas.width = Math.round(w * ratio); canvas.height = Math.round(h * ratio); ctx.setTransform(ratio, 0, 0, ratio, 0, 0); place(true); draw();
+      }
+      function update(dt) {
+        t += dt; const unit = Math.min(w, h) * .48, decay = Math.exp(-DAMPING * dt), radius = Math.min(180, w * .18);
+        for (const p of particles) {
+          const pulse = 1 + Math.sin(t * .35 + p.phase) * .035;
+          const targetX = w / 2 + p.ux * unit * pulse + Math.sin(t * .45 + p.uy * 9) * 12;
+          const targetY = h / 2 + p.uy * unit * .66 * pulse + Math.cos(t * .37 + p.ux * 8) * 10;
+          let ax = (targetX - p.x) * SPRING, ay = (targetY - p.y) * SPRING;
+          if (pointer.active) {
+            const dx = p.x - pointer.x, dy = p.y - pointer.y, distance = Math.hypot(dx, dy);
+            if (distance < radius) { const force = 1800 * Math.pow(1 - distance / radius, 2); ax += (distance > .01 ? dx / distance : 1) * force; ay += (distance > .01 ? dy / distance : 0) * force; }
+          }
+          p.vx = (p.vx + ax * dt) * decay; p.vy = (p.vy + ay * dt) * decay; p.x += p.vx * dt; p.y += p.vy * dt;
+        }
+      }
+      function draw() {
+        ctx.clearRect(0, 0, w, h); const glow = isReduced ? 1 : .87 + Math.sin(t * .4) * .13;
+        for (const p of particles) { ctx.globalAlpha = p.a * glow; ctx.fillStyle = `hsl(${p.hue} 78% 76%)`; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); }
+        ctx.globalAlpha = 1;
+      }
+      function animate(now) {
+        if (isReduced || document.hidden) return;
+        if (previous !== null) accumulator += Math.min((now - previous) / 1000, .05); previous = now;
+        while (accumulator >= STEP) { update(STEP); accumulator -= STEP; } draw(); frame = requestAnimationFrame(animate);
+      }
+      function restart() { if (frame) cancelAnimationFrame(frame); frame = null; previous = null; accumulator = 0; if (isReduced) { place(true); draw(); } else if (!document.hidden) frame = requestAnimationFrame(animate); }
+      canvas.addEventListener('pointermove', event => { const box = canvas.getBoundingClientRect(); pointer.x = event.clientX - box.left; pointer.y = event.clientY - box.top; pointer.active = event.pointerType !== 'touch'; });
+      canvas.addEventListener('pointerleave', () => pointer.active = false);
+      canvas.addEventListener('click', event => { const box = canvas.getBoundingClientRect(), x = event.clientX - box.left, y = event.clientY - box.top; for (const p of particles) { const a = Math.atan2(p.y - y, p.x - x), speed = 260 + random() * 500; p.vx += Math.cos(a) * speed; p.vy += Math.sin(a) * speed; } });
+      reduced.addEventListener('change', event => { isReduced = event.matches; restart(); }); document.addEventListener('visibilitychange', restart); window.addEventListener('resize', resize);
+      resize(); restart();
+    })();
+  </script>
+</body>
+</html>
