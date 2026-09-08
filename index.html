@@ -30,7 +30,7 @@
       const canvas = document.querySelector('canvas'), ctx = canvas.getContext('2d');
       const reduced = matchMedia('(prefers-reduced-motion: reduce)');
       const pointer = { x: 0, y: 0, active: false };
-      let w = 0, h = 0, ratio = 1, t = 0, previous = null, accumulator = 0, frame = null, seed = 213;
+      let w = 0, h = 0, ratio = 1, t = 0, previous = null, accumulator = 0, frame = null, seed = 213, hasPlayedWaterSound = false;
       let isReduced = reduced.matches;
       const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
       const particles = Array.from({ length: COUNT }, () => {
@@ -67,6 +67,33 @@
         for (const p of particles) { ctx.globalAlpha = p.a * glow; ctx.fillStyle = `hsl(${p.hue} 78% 76%)`; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); }
         ctx.globalAlpha = 1;
       }
+      function playWaterShimmer() {
+        if (hasPlayedWaterSound || isReduced) return;
+        hasPlayedWaterSound = true;
+        const Audio = window.AudioContext || window.webkitAudioContext;
+        if (!Audio) return;
+        const audio = new Audio(), now = audio.currentTime, duration = 1.65;
+        const master = audio.createGain();
+        master.gain.setValueAtTime(.0001, now);
+        master.gain.exponentialRampToValueAtTime(.075, now + .09);
+        master.gain.exponentialRampToValueAtTime(.0001, now + duration);
+        master.connect(audio.destination);
+
+        const buffer = audio.createBuffer(1, audio.sampleRate * duration, audio.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+        const water = audio.createBufferSource(), filter = audio.createBiquadFilter();
+        water.buffer = buffer; filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(780, now); filter.frequency.exponentialRampToValueAtTime(250, now + duration);
+        filter.Q.value = .65; water.connect(filter).connect(master); water.start(now); water.stop(now + duration);
+
+        [620, 930, 1280].forEach((frequency, index) => {
+          const bell = audio.createOscillator(), gain = audio.createGain(), start = now + .045 + index * .055;
+          bell.type = 'sine'; bell.frequency.setValueAtTime(frequency, start); bell.frequency.exponentialRampToValueAtTime(frequency * .72, start + .7);
+          gain.gain.setValueAtTime(.0001, start); gain.gain.exponentialRampToValueAtTime(.012 / (index + 1), start + .035); gain.gain.exponentialRampToValueAtTime(.0001, start + .8);
+          bell.connect(gain).connect(master); bell.start(start); bell.stop(start + .82);
+        });
+      }
       function animate(now) {
         if (isReduced || document.hidden) return;
         if (previous !== null) accumulator += Math.min((now - previous) / 1000, .05); previous = now;
@@ -75,7 +102,7 @@
       function restart() { if (frame) cancelAnimationFrame(frame); frame = null; previous = null; accumulator = 0; if (isReduced) { place(true); draw(); } else if (!document.hidden) frame = requestAnimationFrame(animate); }
       canvas.addEventListener('pointermove', event => { const box = canvas.getBoundingClientRect(); pointer.x = event.clientX - box.left; pointer.y = event.clientY - box.top; pointer.active = event.pointerType !== 'touch'; });
       canvas.addEventListener('pointerleave', () => pointer.active = false);
-      canvas.addEventListener('click', event => { const box = canvas.getBoundingClientRect(), x = event.clientX - box.left, y = event.clientY - box.top; for (const p of particles) { const a = Math.atan2(p.y - y, p.x - x), speed = 260 + random() * 500; p.vx += Math.cos(a) * speed; p.vy += Math.sin(a) * speed; } });
+      canvas.addEventListener('click', event => { playWaterShimmer(); const box = canvas.getBoundingClientRect(), x = event.clientX - box.left, y = event.clientY - box.top; for (const p of particles) { const a = Math.atan2(p.y - y, p.x - x), speed = 260 + random() * 500; p.vx += Math.cos(a) * speed; p.vy += Math.sin(a) * speed; } });
       reduced.addEventListener('change', event => { isReduced = event.matches; restart(); }); document.addEventListener('visibilitychange', restart); window.addEventListener('resize', resize);
       resize(); restart();
     })();
